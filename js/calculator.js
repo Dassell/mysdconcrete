@@ -119,12 +119,34 @@ form.addEventListener('submit', async (event) => {
   }
 
   const result = calculate(length, width, thickness, includeWaste);
+
+  const estimateMedium = (result.costLow + result.costHigh) / 2;
+  
   displayResults(result);
+
+  window.dataLayer = window.dataLayer || [];
+
+window.dataLayer.push({
+  event: "concrete_calculation",
+
+  cubic_yards: result.totalYards,
+  estimate_low: result.costLow,
+  estimate_medium: estimateMedium,
+  estimate_high: result.costHigh,
+
+  square_feet: result.squareFeet,
+
+  length_ft: length,
+  width_ft: width,
+  thickness_in: thickness,
+
+  waste_factor: includeWaste
+});
 
   const sessionId = getSessionId();
   const tracking = getTrackingParams();
 
-  const estimateMedium = (result.costLow + result.costHigh) / 2;
+
 
   const { error } = await supabaseClient
     .from("calculations")
