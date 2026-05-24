@@ -1,3 +1,10 @@
+const SUPABASE_URL = "https://gjqukytlonkkxudnqjjo.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_caa1EfHUv02ZMdrbCKmPHA_T0mRiF57";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
 const CUBIC_FEET_PER_YARD = 27;
 const WASTE_FACTOR = 0.10;
 
@@ -16,6 +23,30 @@ const netVolumeEl = document.getElementById('net-volume');
 const totalVolumeEl = document.getElementById('total-volume');
 const sqFtEl = document.getElementById('sq-ft');
 
+function getSessionId() {
+  let sessionId = localStorage.getItem("session_id");
+
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem("session_id", sessionId);
+  }
+
+  return sessionId;
+}
+
+function getTrackingParams() {
+  const params = new URLSearchParams(window.location.search);
+
+  return {
+    gclid: params.get("gclid"),
+    gbraid: params.get("gbraid"),
+    wbraid: params.get("wbraid"),
+    fbclid: params.get("fbclid"),
+    utm_source: params.get("utm_source"),
+    utm_medium: params.get("utm_medium"),
+    utm_campaign: params.get("utm_campaign"),
+  };
+}
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -65,8 +96,7 @@ function displayResults(result) {
   resultsPlaceholder.classList.add('hidden');
   resultsPanel.classList.remove('hidden');
 }
-
-form.addEventListener('submit', (event) => {
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
   hideError();
 
@@ -90,4 +120,45 @@ form.addEventListener('submit', (event) => {
 
   const result = calculate(length, width, thickness, includeWaste);
   displayResults(result);
+
+  const sessionId = getSessionId();
+  const tracking = getTrackingParams();
+
+  const estimateMedium = (result.costLow + result.costHigh) / 2;
+
+  const { error } = await supabaseClient
+    .from("calculations")
+    .insert([
+      {
+        created_at: new Date().toISOString(),
+        session_id: sessionId,
+
+        length_ft: length,
+        width_ft: width,
+        thickness_in: thickness,
+
+        waste_factor: includeWaste,
+
+        cubic_yards: result.totalYards,
+
+        estimate_low: result.costLow,
+        estimate_medium: estimateMedium,
+        estimate_high: result.costHigh,
+
+        gclid: tracking.gclid,
+        gbraid: tracking.gbraid,
+        wbraid: tracking.wbraid,
+        fbclid: tracking.fbclid,
+
+        utm_source: tracking.utm_source,
+        utm_medium: tracking.utm_medium,
+        utm_campaign: tracking.utm_campaign,
+
+        landing_page: window.location.pathname
+      }
+    ]);
+
+  if (error) {
+    console.error("Supabase insert error:", error);
+  }
 });
