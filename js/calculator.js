@@ -175,18 +175,33 @@ function hideError() {
   formError.classList.add('hidden');
   formError.textContent = '';
 }
-
 function displayResults(result) {
   cubicYardsEl.textContent = formatVolume(result.totalYards);
+
   costLowEl.textContent = formatCurrency(result.costLow);
   costHighEl.textContent = formatCurrency(result.costHigh);
+
   netVolumeEl.textContent = `${formatVolume(result.netYards)} cu yd`;
   totalVolumeEl.textContent = `${formatVolume(result.totalYards)} cu yd`;
+
   sqFtEl.textContent = `${result.squareFeet.toFixed(1)} sq ft`;
-  breakdownMaterialEl.textContent = formatCurrency(result.materialMedium);
-  breakdownLaborEl.textContent = formatCurrency(result.laborMedium);
-  breakdownReinforcementEl.textContent = formatCurrency(result.reinforcementMedium);
-  breakdownBaseEl.textContent = formatCurrency(result.baseMedium);
+
+  if (breakdownMaterialEl) {
+    breakdownMaterialEl.textContent = formatCurrency(result.materialMedium);
+  }
+
+  if (breakdownLaborEl) {
+    breakdownLaborEl.textContent = formatCurrency(result.laborMedium);
+  }
+
+  if (breakdownReinforcementEl) {
+    breakdownReinforcementEl.textContent = formatCurrency(result.reinforcementMedium);
+  }
+
+  if (breakdownBaseEl) {
+    breakdownBaseEl.textContent = formatCurrency(result.baseMedium);
+  }
+
   resultsPlaceholder.classList.add('hidden');
   resultsPanel.classList.remove('hidden');
 }
