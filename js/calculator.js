@@ -8,9 +8,6 @@ const supabaseClient = supabase.createClient(
 const CUBIC_FEET_PER_YARD = 27;
 const WASTE_FACTOR = 0.10;
 
-// San Diego market ballpark: delivered + placed, varies by PSI, finish, access
-const COST_PER_YARD = { low: 165, high: 245 };
-
 const form = document.getElementById('calculator-form');
 const formError = document.getElementById('form-error');
 const resultsPlaceholder = document.getElementById('results-placeholder');
@@ -22,6 +19,53 @@ const costHighEl = document.getElementById('cost-high');
 const netVolumeEl = document.getElementById('net-volume');
 const totalVolumeEl = document.getElementById('total-volume');
 const sqFtEl = document.getElementById('sq-ft');
+const breakdownMaterialEl = document.getElementById('breakdown-material');
+const breakdownLaborEl = document.getElementById('breakdown-labor');
+const breakdownReinforcementEl = document.getElementById('breakdown-reinforcement');
+const breakdownBaseEl = document.getElementById('breakdown-base');
+let pricingRules = [];
+let projectTypes = [];
+
+async function loadPricingData() {
+  const { data: rules, error: rulesError } = await supabaseClient
+    .from("pricing_rules")
+    .select("*")
+    .eq("region", "san_diego")
+    .eq("is_active", true);
+
+  if (rulesError) {
+    console.error("Pricing rules error:", rulesError);
+    return;
+  }
+
+  const { data: projects, error: projectsError } = await supabaseClient
+    .from("project_type")
+    .select("*");
+
+  if (projectsError) {
+    console.error("Project type error:", projectsError);
+    return;
+  }
+
+  pricingRules = rules || [];
+  projectTypes = projects || [];
+
+  console.log("Pricing loaded", { pricingRules, projectTypes });
+}
+
+function getRule(category, itemKey) {
+  return pricingRules.find(rule =>
+    rule.category === category &&
+    rule.item_key === itemKey
+  );
+}
+
+function getNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+loadPricingData();
 
 function getSessionId() {
   let sessionId = localStorage.getItem("session_id");
@@ -58,7 +102,6 @@ function formatCurrency(amount) {
 function formatVolume(yards) {
   return yards.toFixed(2);
 }
-
 function calculate(lengthFt, widthFt, thicknessIn, includeWaste) {
   const thicknessFt = thicknessIn / 12;
   const cubicFeet = lengthFt * widthFt * thicknessFt;
@@ -66,12 +109,60 @@ function calculate(lengthFt, widthFt, thicknessIn, includeWaste) {
   const totalYards = includeWaste ? netYards * (1 + WASTE_FACTOR) : netYards;
   const squareFeet = lengthFt * widthFt;
 
+  const concreteRule = getRule("concrete_material", "psi_3000");
+  const laborRule = getRule("labor_finish", "broom");
+  const reinforcementRule = getRule("reinforcement", "wire_mesh");
+  const basePrepRule = getRule("base_prep", "standard_base");
+  const accessRule = getRule("access", "easy_access");
+
+  if (!concreteRule || !laborRule || !reinforcementRule || !basePrepRule || !accessRule) {
+    throw new Error("Pricing data is missing. Check pricing_rules table.");
+  }
+
+  const materialLow = totalYards * getNumber(concreteRule.low_value);
+  const materialMedium = totalYards * getNumber(concreteRule.medium_value);
+  const materialHigh = totalYards * getNumber(concreteRule.high_value);
+
+  const laborLow = squareFeet * getNumber(laborRule.low_value);
+  const laborMedium = squareFeet * getNumber(laborRule.medium_value);
+  const laborHigh = squareFeet * getNumber(laborRule.high_value);
+
+  const reinforcementLow = squareFeet * getNumber(reinforcementRule.low_value);
+  const reinforcementMedium = squareFeet * getNumber(reinforcementRule.medium_value);
+  const reinforcementHigh = squareFeet * getNumber(reinforcementRule.high_value);
+
+  const baseLow = squareFeet * getNumber(basePrepRule.low_value);
+  const baseMedium = squareFeet * getNumber(basePrepRule.medium_value);
+  const baseHigh = squareFeet * getNumber(basePrepRule.high_value);
+
+  const subtotalLow = materialLow + laborLow + reinforcementLow + baseLow;
+  const subtotalMedium = materialMedium + laborMedium + reinforcementMedium + baseMedium;
+  const subtotalHigh = materialHigh + laborHigh + reinforcementHigh + baseHigh;
+
   return {
     netYards,
     totalYards,
     squareFeet,
-    costLow: totalYards * COST_PER_YARD.low,
-    costHigh: totalYards * COST_PER_YARD.high,
+
+    materialLow,
+    materialMedium,
+    materialHigh,
+
+    laborLow,
+    laborMedium,
+    laborHigh,
+
+    reinforcementLow,
+    reinforcementMedium,
+    reinforcementHigh,
+
+    baseLow,
+    baseMedium,
+    baseHigh,
+
+    costLow: subtotalLow * getNumber(accessRule.low_value, 1),
+    costMedium: subtotalMedium * getNumber(accessRule.medium_value, 1),
+    costHigh: subtotalHigh * getNumber(accessRule.high_value, 1),
   };
 }
 
@@ -92,7 +183,10 @@ function displayResults(result) {
   netVolumeEl.textContent = `${formatVolume(result.netYards)} cu yd`;
   totalVolumeEl.textContent = `${formatVolume(result.totalYards)} cu yd`;
   sqFtEl.textContent = `${result.squareFeet.toFixed(1)} sq ft`;
-
+  breakdownMaterialEl.textContent = formatCurrency(result.materialMedium);
+  breakdownLaborEl.textContent = formatCurrency(result.laborMedium);
+  breakdownReinforcementEl.textContent = formatCurrency(result.reinforcementMedium);
+  breakdownBaseEl.textContent = formatCurrency(result.baseMedium);
   resultsPlaceholder.classList.add('hidden');
   resultsPanel.classList.remove('hidden');
 }
@@ -117,10 +211,17 @@ form.addEventListener('submit', async (event) => {
     showError('Please enter a valid thickness greater than zero.');
     return;
   }
+  let result;
 
-  const result = calculate(length, width, thickness, includeWaste);
+  try {
+    result = calculate(length, width, thickness, includeWaste);
+  } catch (error) {
+    console.error(error);
+    showError("Pricing data is still loading. Please try again in a moment.");
+    return;
+  }
 
-  const estimateMedium = (result.costLow + result.costHigh) / 2;
+  const estimateMedium = result.costMedium;
 
   displayResults(result);
 
